@@ -1,0 +1,364 @@
+---
+title: "Exploring Country Gender Equality"
+output:
+  pdf_document: default
+  html_document: default
+  word_document:
+    fig_height: 3.75
+    fig_width: 5
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r,include=F,message=F}
+par(pin=(c(1.9,1.9)))
+library(car)
+library(leaps)
+library(lubridate)
+library(corrplot)
+library(plotrix)
+library(rvest)
+library(olsrr)
+source("http://www.reuningscherer.net/s&ds230/Rfuncs/regJDRS.txt")
+```
+
+Names: Kat Berman and Max Yuhas
+
+## Introduction
+Recent studies in political science have used a gendered political theory lense to suggest a correlation between increased female participation in traditionally male sectors, such as agriculture, economics, and government, with more environmentally friendly carbon emissions. (United Nations Development Program, “Overview of linkages between gender and climate change," 2013).  In addition, recent articles in political science have also suggested a relationship between increased democratization and gender equality (Valentine M. Moghdam, “The Gender of Democracy: The Link Between Women's Rights and Democratization in the Middle East,” 2008).  Based on this information, we were interested in further exploring this correlation and developing our understanding of the relationship between gender equality and other indicator values for countries around the world.  In this project, we decided to compare the gender equality index for countries to their data on female participation in the agricultural sector, carbon emissions data, country GDP, democracy level, and region of the world.
+
+## Data Scraping and Cleaning
+* Country: (Character) List of names of all countries for which we have complete data
+* Total Agro Holding: (Numeric) Total number of agricultural holders (“economic unit of agricultural production under single management comprising all livestock kept and all land used wholly or partly for agricultural production purposes, without regard to title, legal form, or size”) in a Country (Food and Agriculture Organization of the United Nations, “Gender and Land Rights Database,” http://www.fao.org/gender-landrights-database/data-map/statistics/en/)
+* Female Agro Holding: (Numeric) The number of female agricultural holders in a country
+* Percentage Female: (Numeric) The percentage of female agricultural holders out of all agricultural holders in a country
+
+*Note: The previous three data variables have values that are all from random years due to availability of data. We assume that these values do not change drastically from year to year.*
+
+* CO2 Emissions: (Numeric) Total annual carbon dioxide emissions for a country (in gigatons)
+* GDP (Millions USD): (Numeric) Total annual GDP for each country in millions of dollars
+* GDP from Agro (Millions USD): (Numeric) The total GDP for each country from the agricultural sector in millions of USD
+* Region: (Factor) Region of the world that the country is in with levels Africa, Asia, Europe, Middle East, North America or South America.
+* Global Gender Gap Index: (Numeric) A rank of the countries gender gap based on health, education, economy, and politics to assess gender equality in a country.  1 signifies complete equality for women and 0 is the lowest equality for women. This index is given to countries by the World Economic Forum.
+* Democracy Score:  (Numeric) A score from one to ten (one the least and ten the most democratic) ranking how democratic a country is. This index is given to countries by the Economist Intelligence Unit. 
+* Democratic Category: (Factor) A qualitative representation categorizing the countries based on their democracy score with levels full democracy, flawed democracy, hybrid regime, or authoritarian.
+
+First, the data on agricultural land holdings, Carbon Dioxide emissions, and GDP were downloaded from the Food and Agriculture Organization of the United Nations database. Data for Global Gender Gap Index, Democracy Score, and Democracy Category were scraped off of Wikipedia.
+The main aspects of this data cleaning revolved around merging each individual data set from the different sources onto the master data frame.  In order to do this, it was necessary to go through the country names from each source and edit those that had alternative spellings so that the same country would be recognized from different data sources (e.g. “United States” vs “United States of America”).  In addition, during the data scraping process, we collected a number of variables that were repetitive/not necessary for the final dataframe, so we removed these variables from the final dataset. Also, some countries were the only nations in a region, so we edited the regions for these countries to include them in a larger region (e.g. Egypt was the only country in the “Middle East and Africa”, we just included it in the “Middle East” region).  After cleaning all of the variables data, we converted types of data of some variables so that Country, Democracy Category, and Region are factors whereas Democracy Score, Total Agro Holding, Female Agro Holding, and Percentage Female are numeric.  Finally, we merged all data onto the master data frame and omitted any countries with missing data and attached the variables.
+
+```{r,include=F}
+genderdata <- read.csv("Agricultural Landholding Data.csv")
+genderdata <- genderdata[c("Country","Total","Female","X..female")]
+names(genderdata) <- c("Country","Total Agro Holding","Female Agro Holding","Percentage Female")
+```
+
+```{r,include=F}
+emissionsdata <- read.csv("FAOSTAT_data_Emissions.csv")
+emissionsdata <- emissionsdata[c("Area", "Value")]
+names(emissionsdata) <- c("Country", "CO2 Emissions (Gg)")
+```
+
+```{r,include=F}
+econdata <- read.csv("FAOSTAT_data_MacroEcon.csv")
+econdata1 <- econdata[econdata$Item.Code == 22008,]
+econdata2 <- econdata[econdata$Item.Code == 22016,]
+econdata <- merge(econdata1,econdata2,by.x="Area",by.y="Area",sort=T)
+econdata <- econdata[c("Area", "Value.x", "Value.y")]
+names(econdata) <- c("Country", "GDP (Millions USD)", "GDP from Agro (Millions USD)")
+```
+
+```{r,include=F}
+url <- "https://en.wikipedia.org/wiki/Global_Gender_Gap_Report"
+webpage <- read_html(url)
+
+regionhtml <- html_nodes(webpage,'td:nth-child(2)')
+region <- html_text(regionhtml)
+region <- region[1:147]
+
+countryhtml <- html_nodes(webpage,'td:nth-child(1)')
+country <- gsub("^\\s+","",html_text(countryhtml))
+country <- country[1:147]
+
+indexhtml <- html_nodes(webpage,'td:nth-child(13)')
+index <- as.numeric(html_text(indexhtml))
+
+equalityindex <- data.frame(country,region,index)
+names(equalityindex) <- c("Country","Region","Global Gender Gap Index")
+equalityindex <- equalityindex[order(equalityindex$Country),]
+```
+
+```{r,include=F}
+url2 <- "https://en.wikipedia.org/wiki/Democracy_Index"
+webpage2 <- read_html(url2)
+countryhtml2 <- html_nodes(webpage2,'td:nth-child(2)')
+country2 <- gsub("^\\s+","",html_text(countryhtml2))
+country2 <- country2[1:167]
+
+govhtml <- html_nodes(webpage2,'b')
+govhtml <- govhtml[7:334]
+govhtml <- html_text(govhtml)
+demscore <- govhtml[seq(1,334,by=2)]
+demtype <- govhtml[seq(2,334,by=2)]
+
+demindex <- data.frame(country2,demscore,demtype)
+names(demindex) <- c("Country","Democracy Score","Democracy Category")
+demindex <- demindex[order(demindex$Country),]
+```
+
+
+```{r,include=F}
+searchvec1 <- c("Côte d'Ivoire", "Gambia, The", "Iran, Islamic Rep.", "Korea, Rep.", "Kyrgyz Republic", "Russian Federation", "United States")
+replacevec1 <- c("Ivory Coast", "Gambia", "Iran", "South Korea", "Kyrgyzstan", "Russia", "United States of America")
+for (i in 1:length(searchvec1)){
+  equalityindex$Country <- gsub(searchvec1[i], replacevec1[i], equalityindex$Country)
+}
+
+searchvec2 <- c("United States")
+replacevec2 <- c("United States of America")
+for (i in 1:length(searchvec2)){
+  demindex$Country <- gsub(searchvec2[i], replacevec2[i], demindex$Country)
+}
+
+searchvec3 <- c("Bolivia \\(Plurinational State of\\)", "Cabo Verde", "China, Hong Kong SAR", "China, mainland", "C̫te d'Ivoire", "Cura̤ao", "Democratic People's Republic of Korea", "Iran \\(Islamic Republic of\\)", "Lao People's Democratic Republic", "Occupied Palestinian Territory", "Republic of Korea", "Republic of Moldova", "Russian Federation", "Syrian Arab Republic", "The former Yugoslav Republic of Macedonia", "United Republic of Tanzania", "Venezuela \\(Bolivarian Republic of\\)", "Viet Nam")
+replacevec3 <- c("Bolivia", "Cape Verde", "Hong Kong", "China", "Ivory Coast", "Curacao", "North Korea", "Iran", "Laos", "Palestine", "South Korea", "Moldova", "Russia", "Syria", "Macedonia", "Tanzania", "Venezuela", "Vietnam")
+for (i in 1:length(searchvec3)){
+  econdata$Country <- gsub(searchvec3[i], replacevec3[i], econdata$Country)
+}
+
+searchvec4 <- c("Bolivia \\(Plurinational State of\\)", "Cabo Verde", "China, Hong Kong SAR", "China, Macao SAR", "China, mainland", "China, Taiwan Province of", "C̫te d'Ivoire", "Cura̤ao", "Democratic People's Republic of Korea", "Iran \\(Islamic Republic of\\)", "Lao People's Democratic Republic", "Occupied Palestinian Territory", "Republic of Korea", "Republic of Moldova", "Russian Federation", "Syrian Arab Republic", "The former Yugoslav Republic of Macedonia", "United Republic of Tanzania", "Venezuela \\(Bolivarian Republic of\\)", "Viet Nam")
+replacevec4 <- c("Bolivia", "Cape Verde", "Hong Kong", "Macao", "China", "Taiwan", "Ivory Coast", "Curacao", "North Korea", "Iran", "Laos", "Palestine", "South Korea", "Moldova", "Russia", "Syria", "Macedonia", "Tanzania", "Venezuela", "Vietnam")
+for (i in 1:length(searchvec4)){
+  emissionsdata$Country <- gsub(searchvec4[i], replacevec4[i], emissionsdata$Country)
+}
+
+searchvec5 <- c("C\x99te d'Ivoire", "Republic of Moldova")
+replacevec5 <- c("Ivory Coast", "Moldova")
+for (i in 1:length(searchvec5)){
+  genderdata$Country <- gsub(searchvec5[i], replacevec5[i], genderdata$Country)
+}
+
+mastercountries <- c(as.character(equalityindex$Country), as.character(demindex$Country), as.character(econdata$Country), as.character(emissionsdata$Country), as.character(genderdata$Country))
+```
+
+```{r,message=F,include=F}
+masterframe <- merge.data.frame(equalityindex, demindex, by.x = "Country", sort = TRUE)
+masterframe <- merge.data.frame(masterframe, econdata, by.x = "Country", sort = TRUE)
+masterframe <- merge.data.frame(masterframe, emissionsdata, by.x = "Country", sort = TRUE)
+masterframe <- merge.data.frame(masterframe, genderdata, by.x = "Country", sort = TRUE)
+(masterframe <- na.omit(masterframe))
+
+masterframe$`Democracy Score` <- as.numeric(as.character(masterframe$`Democracy Score`))
+masterframe$`Total Agro Holding` <- as.numeric(as.character(gsub(",","",masterframe$`Total Agro Holding`)))
+masterframe$`Female Agro Holding` <- as.numeric(as.character(gsub(",","",masterframe$`Female Agro Holding`)))
+masterframe$`Percentage Female` <- as.numeric(as.character(gsub("%","",masterframe$`Percentage Female`)))
+
+masterframe$Country <- as.character(masterframe$Country)
+
+masterframe$Region <- as.character(masterframe$Region)
+masterframe$Region[which(masterframe$Country == "Cyprus")] <- "Europe"
+masterframe$Region[which(masterframe$Country == "Georgia")] <- "Asia"
+masterframe$Region[which(masterframe$Country == "Egypt")] <- "Middle East"
+masterframe$Region <- gsub("South Asia|Central Asia|Southeast Asia","Asia",masterframe$Region)
+masterframe$Region <- as.factor(masterframe$Region)
+masterframe$`Democracy Category` <- as.character(masterframe$`Democracy Category`)
+unique(masterframe$`Democracy Category`)
+masterframe$`Democracy Category` <- as.factor(masterframe$`Democracy Category`)
+attach(masterframe)
+```
+```{r}
+head(masterframe)
+```
+
+## Graphics, Data Visualization, Testing
+#### Scatterplots
+```{r,echo=F}
+numericdata <- masterframe[c("Global Gender Gap Index","Democracy Score","GDP (Millions USD)","GDP from Agro (Millions USD)","CO2 Emissions (Gg)","Total Agro Holding","Female Agro Holding","Percentage Female")]
+
+#Example:
+plot(`CO2 Emissions (Gg)`,`GDP (Millions USD)`,main="Total GDP vs CO2 Emissions")
+plot(log(`CO2 Emissions (Gg)`),log(`GDP (Millions USD)`),main="Log(Total GDP) vs Log(CO2 Emissions)")
+
+numericdata$`GDP (Millions USD)` <- log(numericdata$`GDP (Millions USD)`)
+numericdata$`GDP from Agro (Millions USD)` <- log(numericdata$`GDP from Agro (Millions USD)`)
+numericdata$`CO2 Emissions (Gg)` <- log(numericdata$`CO2 Emissions (Gg)`)
+numericdata$`Total Agro Holding` <- log(numericdata$`Total Agro Holding`)
+numericdata$`Female Agro Holding` <- log(numericdata$`Female Agro Holding`)
+pairs(numericdata)
+```
+
+There is a clear positive trend between democracy score and the global gender gap index score (GGGI).  In addition, there is a positive trend between percentage of agricultural landholdings help by females and the democracy score and the GGGI score.  However, it is difficult to determine whether there are any strong correlations between many of the variables because most plots have clusters in some areas.  Because of this, we expected that transformations would be useful to determine connections between numeric variables.  We used a logarithmic transformation on the numeric data variables (except GGGI, Democracy Score, and Percentage Female) to better see trends in the data.  Above is an example of Carbon Dioxide Emissions vs Total GDP without and with the log transformation, clearly the log-transformed scatterplot allows us to better see the connection between the data.  Thus, for the remainder of the project, we use the log-transform total GDP, GDP from Agro, CO2 emissions, Total Agro Holdings, and Female Agro Holding. With this transformation, we can see a positive correlation between (1) GGGI and Democracy Score, (2) GDP and GDP from Agro, (3) GDP and CO2 emissions, (4) GDP from Agro and Total Agro Holdings, (5) GDP from Agro and Female Agro Holdings, (6) CO2 emissions and Female agro holdings, and (7) total agro holdings and female agro holdings.
+
+#### Correlation Plots and Correlation Permutation
+```{r,echo=F}
+cor1 <- round(cor(numericdata, use = "pairwise.complete.obs"),2)
+sigcorr <- cor.mtest(numericdata, conf.level = .95)
+corrplot.mixed(cor1,lower.col="black", upper = "ellipse", tl.col = "black", number.cex=.7, 
+                order = "FPC", tl.pos = "lt", tl.cex=.7, p.mat = sigcorr$p, sig.level = .05)
+```
+
+Without looking at each individual scatterplot on a larger scale, it can be difficult to tell if there is any significant correlation in some of the scatterplots. This corrplot function gives some added insight on the above scatterplots. It allows us to see correlations between variables and how significant these correlations are (insignificant correlations are crossed out). There is a negative correlation between percentage female and both GDP from Agro and CO2 emissions, as well as a negative correlation between democracy score and total agro holding.  In general, the trends seen in the scatterplots above are confirmed by the corrplot (such as high positive correlation between GGGI and Democracy Score).
+
+```{r,include=F,message=F}
+masterframe$`GDP (Millions USD)` <- log(`GDP (Millions USD)`)
+masterframe$`GDP from Agro (Millions USD)` <- log(`GDP from Agro (Millions USD)`)
+masterframe$`CO2 Emissions (Gg)` <- log(`CO2 Emissions (Gg)`)
+masterframe$`Total Agro Holding` <- log(`Total Agro Holding`)
+masterframe$`Female Agro Holding` <- log(`Female Agro Holding`)
+attach(masterframe)
+```
+
+```{r,include=F}
+permCor <- function(x, y, n_samp = 10000, plot = T){
+   corResults <- rep(NA, n_samp)
+   for (i in 1:n_samp){
+      corResults[i] <- cor(x, sample(y))
+   }
+   pval <- mean(abs(corResults) >= cor(x,y))
+   if (plot == T){
+      #Make histogram of permuted correlations
+      hist(corResults, col = "yellow", main = "", xlab = "Correlations", breaks = 50,
+           xlim = range(corResults,cor(x,y)))
+      mtext("Permuted Sample Correlations", cex = 1.2, line = 1)
+      mtext(paste("Permuted P-value =",round(pval,5)), cex = 1, line = 0)
+      abline(v = cor(x,y), col="blue", lwd=3)
+      text(cor(x,y)*.95, 0,paste("Actual Correlation =", round(cor(x,y),2)),srt = 90, adj = 0)
+   }
+   if (plot == F){
+      return(round(pval,5))
+   }  
+}
+```
+
+```{r,include=F}
+set.seed(1)
+plot(`Percentage Female`,`Global Gender Gap Index`,pch=19, col="red")
+mtext("GGGI vs Percentage Female",line=1,cex=1.2)
+mtext(paste("Sample Correlation =", round(cor(`Percentage Female`,`Global Gender Gap Index`),3)), line=0, cex=1)
+permCor(`Percentage Female`,`Global Gender Gap Index`)
+
+plot(`GDP (Millions USD)`,`Global Gender Gap Index`,pch=19, col="red")
+mtext("GGGI vs Total GDP",line=1,cex=1.2)
+mtext(paste("Sample Correlation =", round(cor(`GDP (Millions USD)`,`Global Gender Gap Index`),3)), line=0, cex=1)
+permCor(`GDP (Millions USD)`,`Global Gender Gap Index`)
+```
+
+By doing permutation tests on correlation, we can confirm what we see in the Correlation Plot above. The permutation tests have a null hypothesis of correlation equal to zero and an alternative hypothesis of non-zero correlation. When permuting for Percentage Female vs GGGI, we get a p-value of 0.0017 (less than alpha=0.05). Thus, we reject the null hypothesis(therefore it makes sense that it is not crossed out above as insignificant). However, when we look at Total GDP vs GGGI, we get a p-value of 0.1643 (greater than alpha=0.05). Thus, we fail to reject the null hypothesis(again it makes sense then that it was crossed out above). Therefore, we would expect Percentage Female to be a good predictor of GGGI and GDP to not be a good predictor of GGGI when we look at our regression models.
+
+#### Categorical Variable Analysis (Boxplots, T-tests, Bootstrapping)
+```{r,echo=F}
+par(mar=c(8,5,4,2))
+boxplot(`Global Gender Gap Index`~Region,las=2,ylab="Global Gender Gap Index",)
+boxplot(`Global Gender Gap Index`~`Democracy Category`,ylab="Global Gender Gap Index",las=2)
+```
+
+These two boxplots help visualive how GGGI changes for our different categorical variables. For region, we see that GGGI is highest for Europe and lowest for the Middle East. Based on this plot, variance seems to change by region, this may cause some issues with heteroskedasticity later on. For democracy category, GGGI is highest for full democracies and lowest in authoritarian regimes. The variances here all look relatively similar. In general, these graphs make sense based on what we know about different country's political regimes and attitudes towards women.
+
+```{r,echo=F}
+aov1 <- aov(`Global Gender Gap Index`~Region)
+summary(aov1)
+pairwise.t.test(`Global Gender Gap Index`,Region)
+
+par(mar=c(5,7.5,4,2))
+mod1 <- lm(`Global Gender Gap Index`~Region - 1)
+CIs1 <- confint(mod1)
+coefs1 <- coef(mod1)
+plotCI(coefs1, 1:(length(coefs1)), ui=CIs1[,2], li=CIs1[,1], err = "x", axes=F,
+       ylab="", xlab="Mean (and 95% CI)", main = "Mean and CI's for GGGI by Region", lwd = 2, col = "blue",xlim=c(.55,.8))
+axis(side = 1 )
+axis(side = 2, at = 1:(length(coefs1)), label=levels(Region), las=2)
+
+par(mar=c(8,5,4,2))
+myResPlots2(aov1)
+sds1 <- by(`Global Gender Gap Index`,Region,sd)
+ratio1 <- max(sds1)/min(sds1)
+
+oneway.test(`Global Gender Gap Index`~Region)
+kruskal.test(`Global Gender Gap Index`~Region)
+```
+
+Here we performed a ANOVA model on GGGI by Region. This test shows that there is statistically significant different in mean GGGI by Region (p-value=7.3e-10 < alpha=0.05). Additionally, we did a pairwise t-test to look closer at the different in mean GGGI for each pair of regions. We see that the only statistically significant pairs (alpha=0.05) are Europe-Africa, Europe-Asia, Middle East-Africa, Middle East-Asia, Middle East-Europe, North America-Middle East, and South America-Middle East. We plotted the confidence intervals for mean GGGI and plotted the normal quantiles and residuals by fit. We saw that the residuals are NOT normally distributed and there is strong evidence of heteroskedasticity (ratio of maximum to minimum standard deviations is 4.11). We could have done a Box-Cox procedure, but it does not exactly make sense to transform an index scored from 0 to 1. Instead, we performed a one-way means analysis to confirm the difference in means without assumptions of equal variances (p-value=1.539e-12 < alpha=0.05). Additionally, we performed a Kruskal-Wallis test with no assumption of variance of sample distribution and confirmed the difference in means (p-value=1.283e-06 < alpha=0.05).
+
+```{r,echo=F}
+aov2 <- aov(`Global Gender Gap Index`~`Democracy Category`)
+summary(aov2)
+pairwise.t.test(`Global Gender Gap Index`,`Democracy Category`)
+
+par(mar=c(5,8,4,2))
+mod2 <- lm(`Global Gender Gap Index`~`Democracy Category` - 1)
+CIs2 <- confint(mod2)
+coefs2 <- coef(mod2)
+plotCI(coefs2, 1:(length(coefs2)), ui=CIs2[,2], li=CIs2[,1], err = "x", axes=F,
+       ylab="", xlab="Mean (and 95% CI)", main = "Mean and CI's for GGGI by Democracy Category", cex.main=1,lwd = 2, col = "blue",xlim=c(.6,.8))
+axis(side = 1 )
+axis(side = 2, at = 1:(length(coefs2)), label=levels(`Democracy Category`), las=2)
+
+par(mar=c(8,5,4,2))
+myResPlots2(aov2)
+sds2 <- by(`Global Gender Gap Index`,`Democracy Category`,sd)
+ratio2 <- max(sds2)/min(sds2)
+```
+
+Now we performed a ANOVA model on GGGI by Democracy Category. This test shows that there is statistically significant different in mean GGGI by Democracy Category (p-value=2.21e-10 < alpha=0.05). Additionally, we did a pairwise t-test to look closer at the different in mean GGGI for each pair of democracy styles. We see that all pairs have a statistically significant difference in mean GGGI (alpha=0.05). We plotted the confidence intervals for mean GGGI and plotted the normal quantiles and residuals by fit. We saw that the residuals are normally distributed and there is no evidence of heteroskedasticity (ratio of maximum to minimum standard deviations is 1.77).
+
+```{r,echo=F}
+set.seed(1)
+test1 <- t.test(`Global Gender Gap Index`[`Democracy Category` == "Full democracy"],`Global Gender Gap Index`[`Democracy Category` == "Authoritarian"], conf.level = 0.95)
+
+n_samp <-  10000
+diffGDP <-  rep(NA, n_samp)
+for(i in 1:n_samp){
+  aut    <-  sample(`Global Gender Gap Index`[`Democracy Category` == "Authoritarian"], sum(`Democracy Category` == "Authoritarian"), replace=T)
+  fulldem <-  sample(`Global Gender Gap Index`[`Democracy Category` == "Full democracy"], sum(`Democracy Category` == "Full democracy"), replace=T)
+  diffGDP[i] <-  mean(fulldem) - mean(aut)
+}
+
+ci <-  quantile(diffGDP, c(.025, .975))
+ci
+test1$conf.int
+
+hist(diffGDP, col = "blue",xlab = "Global Gender Gap Index", main="",breaks=50)
+mtext("Bootstrapped Differences in Mean of GGGI",line=1,cex=1.1)
+mtext("Full Democracy vs Authoritarian",line=0,cex=1)
+abline(v=ci,lwd=3, col="red")
+abline(v=test1$conf.int,lwd=3, col="yellow", lty = 2)
+legend("topleft", c("Original CI","Boot CI"), lwd=3, col = c("yellow","red"), lty = c(2,1))
+```
+
+We bootstrapped the difference in mean GGGI for Full Democracies vs Authoritarian regimes. We took 10000 samples and plotted them. The histogram also displays the original t-test and bootstrapped 95%  confidence intervals. The bootstrapped confidence interval (0.0953,0.1698) is slightly narrower than then t-test interval (0.0919,0.1738). This bootstrap analysis confirms that the difference in means is statistical significant since both confidence intervals do not include 0.
+
+## Regression
+```{r,include=F}
+regdf <- masterframe[c("Global Gender Gap Index","Region","Democracy Category","GDP (Millions USD)","CO2 Emissions (Gg)","Total Agro Holding","Percentage Female")]
+mod3 <- regsubsets(`Global Gender Gap Index` ~ .,data=regdf,nvmax = 20)
+mod3sum <- summary(mod3)
+mod3sum$which
+
+#By adjusted R-squared
+(modnum <- which.max(mod3sum$adjr2))
+names(regdf)[mod3sum$which[modnum,]][-1]
+temp <- regdf[mod3sum$which[modnum,],]
+summary(lm(`Global Gender Gap Index` ~ .,data=temp))
+#By BIC
+(modnum <- which.min(mod3sum$bic))
+names(regdf)[mod3sum$which[modnum,]][-1]
+temp <- regdf[mod3sum$which[modnum,],]
+summary(lm(`Global Gender Gap Index` ~ .,data=temp))
+```
+
+We made a new data frame to perform regression. We did not need every single variable, because some are rudeundant or unnecessary. We did not include Country, Democracy Score, GDP from Agro, or Female Agro Holding. Country is too specific to tell us anything important, since we want to predict GGGI score based on general economic and politcal information. Each country is directly given a GGGI score, so it would be a perfect (but useless) predictor. We will use democracy category as a categorical variable instead of democracy score. We are interested in how different style regimes affect GGGI, not the exact level of democracy. GDP from Agro is not going to be very important given we have total GDP and Total Agro Holding. Finally, we don't need to include the raw female agro holding numbers if we are using the percentage of female agro holding. This limits the number of potential variables in a reasonable way. We tried to use regression subsets function, but this may not make sense because it actually subsets based on each level for the categorical data.
+
+```{r,echo=F}
+m1 <- lm(`Global Gender Gap Index`~Region+`Democracy Category`+`GDP (Millions USD)`+`CO2 Emissions (Gg)`+`Total Agro Holding`+`Percentage Female`+`Percentage Female`*`Democracy Category`+Region*`GDP (Millions USD)`+`CO2 Emissions (Gg)`*`GDP (Millions USD)`+`GDP (Millions USD)`*`Total Agro Holding`)
+
+m2 <- lm(`Global Gender Gap Index`~Region+`Democracy Category`+`Percentage Female`)
+summary(m2)
+Anova(m2,type=3)
+
+myResPlots2(m2)
+```
+
+Instead, we decided to just do backwards stepwise regression using ANOVA Type III sum of squares and a significance level of 0.05. We made sure to remove interaction terms before removing main effect terms when performing backwards step regression. In order we removed the following: Total GDP-Total Agro Holding, Region-Total GDP, Total GDP-CO2 Emissions, Total GDP, Percentage Female-Democracy Category, Total Agro Holding, and CO2 Emissions. This left us with a linear model with Region, Democracy Category, and Percentage Female as the only predictors. This makes sense, as democracy category and region were found to be statistically significant with regards to mean GGGI. Additionally, percentage female and GGGI had a strong positive correlation in the corrplot. Looking at the summary information, Europe, Asia and North America predict the highest GGGI while the Middle East predicts a much lower GGGI. Additionally, Full Democracies have much higher GGGI scores than Authoritarian regimes. Finally, we see that as percentage of female agricultural landholdings increases so does the GGGI. More generally, these predictors make sense because countries that have higher democracy levels and have female holding a higher percentage of agricultural land would likely have higher levels of gender equality. Looking at the residual plots for this model, we see some slight heteroskedasticity and relatively normally distributed residuals (though there is some deviance from the normal at the upper tail). However, these do not appear to be very big issues and, again, it does not really make sense to transform a variable scored from 0 to 1.
+
+## Conclusion and Summary
+The initial motivation for this project was to extend current political science research connecting gendered participation in industry to climate change and gender equality to democratization. We took data from the Food and Agriculture Organization of the United Nations database and from Wikipedia regarding macroeconomics, carbon dioxide emissions, agricultural landholdings, and democracy. We wanted to see how these factors predict gender equality (specifically the Global Gender Gap Index (GGGI) score calculated by the World Economic Forum). We found percentage of female agricultural landholdings and democracy score were strongly positively correlated, while total agricultural landholdings were negatively correlated. We saw that the mean GGGI scores was statistically different by region and democracy category. Finally, we did a backwards stepwise regression to find the best GGGI predictors. We found that region, democracy category, and percentage of female agricultural landholdings were the bests predictors. Countries in the Middle East and authoritarian regimes both had lower GGGI scores compared to countries that were fully democratic and from Europe, Asia, or North America. A higher percentage of agricultural land held by females predicted a higher GGGI score as well. Logically this make sense given the previous research explained in the introduction and the expectation that the larger role of females industry is suggestive of a greater gender equality.
